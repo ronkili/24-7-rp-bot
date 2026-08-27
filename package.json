@@ -1,0 +1,14 @@
+{
+  "name": "rp-city-bot",
+  "version": "1.0.0",
+  "description": "RP City Discord Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "deploy": "node deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^17.2.3"
+  }
+}
