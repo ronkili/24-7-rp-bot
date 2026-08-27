@@ -9,5 +9,5 @@ module.exports = {
 
   ticketCategoryId: "1540734526794375199",
   ticketStaffRoleId: "1542187048897880224",
-  ticketLogsChannelId: "1542187570308321441"
+  ticketLogsChannelId: "1542187458110820483"
 };
