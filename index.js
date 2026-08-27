@@ -16,7 +16,10 @@ const {
   ChannelType,
   PermissionFlagsBits,
   Events,
-  AttachmentBuilder
+  AttachmentBuilder,
+  REST,
+  Routes,
+  SlashCommandBuilder
 } = require("discord.js");
 
 const config = require("./config");
@@ -67,6 +70,159 @@ const client = new Client({
   ],
   partials: [Partials.Channel]
 });
+
+function userReasonCommand(name, description) {
+  return new SlashCommandBuilder()
+    .setName(name)
+    .setDescription(description)
+    .addUserOption(option =>
+      option
+        .setName("user")
+        .setDescription("המשתמש")
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName("reason")
+        .setDescription("סיבה")
+        .setRequired(false)
+    );
+}
+
+async function registerSlashCommands() {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("ping")
+      .setDescription("בודק אם הבוט עובד"),
+
+    new SlashCommandBuilder()
+      .setName("ticket-panel")
+      .setDescription("שולח פאנל טיקטים")
+      .setDefaultMemberPermissions(
+        PermissionFlagsBits.ManageGuild
+      ),
+
+    userReasonCommand(
+      "warn",
+      "נותן אזהרה למשתמש"
+    ),
+
+    new SlashCommandBuilder()
+      .setName("timeout")
+      .setDescription("נותן Timeout למשתמש")
+      .addUserOption(option =>
+        option
+          .setName("user")
+          .setDescription("המשתמש")
+          .setRequired(true)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName("minutes")
+          .setDescription("כמה דקות")
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(40320)
+      )
+      .addStringOption(option =>
+        option
+          .setName("reason")
+          .setDescription("סיבה")
+          .setRequired(false)
+      ),
+
+    userReasonCommand(
+      "kick",
+      "מעיף משתמש"
+    ),
+
+    userReasonCommand(
+      "ban",
+      "נותן באן למשתמש"
+    ),
+
+    new SlashCommandBuilder()
+      .setName("clear")
+      .setDescription("מוחק הודעות")
+      .addIntegerOption(option =>
+        option
+          .setName("amount")
+          .setDescription("כמות")
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(100)
+      ),
+
+    userReasonCommand(
+      "mute",
+      "נותן Chat Mute למשתמש"
+    ),
+
+    userReasonCommand(
+      "unmute",
+      "מסיר Chat Mute ממשתמש"
+    ),
+
+    userReasonCommand(
+      "voice-mute",
+      "עושה Server Mute למשתמש ב־Voice"
+    ),
+
+    userReasonCommand(
+      "voice-unmute",
+      "מוריד Server Mute ממשתמש"
+    ),
+
+    userReasonCommand(
+      "voice-deafen",
+      "עושה Server Deafen למשתמש"
+    ),
+
+    userReasonCommand(
+      "voice-undeafen",
+      "מוריד Server Deafen ממשתמש"
+    )
+  ].map(command => command.toJSON());
+
+  if (!process.env.TOKEN) {
+    throw new Error("TOKEN missing");
+  }
+
+  if (!config.clientId || !config.guildId) {
+    throw new Error(
+      "clientId או guildId חסרים ב־config.js"
+    );
+  }
+
+  const rest = new REST({
+    version: "10"
+  }).setToken(process.env.TOKEN);
+
+  console.log(
+    `🔄 Registering ${commands.length} slash commands...`
+  );
+
+  const registered = await rest.put(
+    Routes.applicationGuildCommands(
+      config.clientId,
+      config.guildId
+    ),
+    {
+      body: commands
+    }
+  );
+
+  console.log(
+    `✅ Registered ${registered.length} slash commands`
+  );
+
+  console.log(
+    registered
+      .map(command => `✅ /${command.name}`)
+      .join("\n")
+  );
+}
+
 
 function isStaff(member) {
   return Boolean(
@@ -258,10 +414,19 @@ async function openTicket(interaction, data) {
   });
 }
 
-client.once(Events.ClientReady, readyClient => {
+client.once(Events.ClientReady, async readyClient => {
   console.log(`✅ Logged in as ${readyClient.user.tag}`);
   console.log(`✅ Bot ID: ${readyClient.user.id}`);
   console.log(`✅ Servers: ${readyClient.guilds.cache.size}`);
+
+  try {
+    await registerSlashCommands();
+  } catch (error) {
+    console.error(
+      "❌ Slash command registration failed:",
+      error
+    );
+  }
 });
 
 client.on(Events.MessageCreate, async message => {
