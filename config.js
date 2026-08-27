@@ -7,7 +7,7 @@ module.exports = {
   staffRoleId: "1542187048897880224",
   modLogsChannelId: "1542187458110820483",
 
-  // הרול שהבוט ייתן ב-Chat Mute
+  // שים כאן את ה-ID של רול ה-Chat Mute
   muteRoleId: "1542582533303177316",
 
   ticketCategoryId: "1540734526794375199",
