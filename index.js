@@ -265,27 +265,52 @@ client.once(Events.ClientReady, readyClient => {
 });
 
 client.on(Events.MessageCreate, async message => {
-  if (!message.guild || message.author.bot) return;
+  try {
+    if (!message.guild) return;
+    if (message.author.bot) return;
 
-  const prefix = config.prefix || "!";
+    const prefix = config.prefix || "!";
+    const content = String(message.content || "").trim();
 
-  if (message.content.trim().toLowerCase() === `${prefix}h`) {
+    if (content.toLowerCase() !== `${prefix}h`.toLowerCase()) {
+      return;
+    }
+
     const embed = new EmbedBuilder()
       .setColor("Blue")
       .setTitle("📚 Help")
       .setDescription(
         [
-          "`/ping` — בדיקת בוט",
-          "`/ticket-panel` — פאנל טיקטים",
-          "`/warn` — אזהרה",
-          "`/timeout` — טיימאאוט",
-          "`/kick` — קיק",
-          "`/ban` — באן",
-          "`/clear` — מחיקת הודעות"
+          "**בדיקת הבוט**",
+          "`/ping` — בודק אם הבוט עובד",
+          "",
+          "**טיקטים**",
+          "`/ticket-panel` — שולח פאנל טיקטים",
+          "",
+          "**מודרציה**",
+          "`/warn` — אזהרה למשתמש",
+          "`/timeout` — Timeout למשתמש",
+          "`/kick` — מעיף משתמש",
+          "`/ban` — נותן באן",
+          "`/clear` — מוחק הודעות",
+          "`/mute` — Chat Mute",
+          "`/unmute` — הסרת Chat Mute",
+          "`/voice-mute` — Server Mute ב־Voice",
+          "`/voice-unmute` — הסרת Server Mute",
+          "`/voice-deafen` — Server Deafen",
+          "`/voice-undeafen` — הסרת Server Deafen"
         ].join("\n")
-      );
+      )
+      .setFooter({
+        text: `Prefix: ${prefix}`
+      })
+      .setTimestamp();
 
-    return message.reply({ embeds: [embed] });
+    await message.reply({
+      embeds: [embed]
+    });
+  } catch (error) {
+    console.error("❌ !h error:", error);
   }
 });
 
@@ -351,8 +376,19 @@ client.on(Events.InteractionCreate, async interaction => {
       }
 
       if (
-        ["warn", "timeout", "kick", "ban", "clear"]
-          .includes(interaction.commandName)
+        [
+          "warn",
+          "timeout",
+          "kick",
+          "ban",
+          "clear",
+          "mute",
+          "unmute",
+          "voice-mute",
+          "voice-unmute",
+          "voice-deafen",
+          "voice-undeafen"
+        ].includes(interaction.commandName)
       ) {
         if (!isStaff(interaction.member)) {
           return interaction.reply({
@@ -360,6 +396,278 @@ client.on(Events.InteractionCreate, async interaction => {
             ephemeral: true
           });
         }
+      }
+
+      if (
+        ["mute", "unmute"].includes(interaction.commandName)
+      ) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ אין לך גישה.",
+            ephemeral: true
+          });
+        }
+
+        if (!config.muteRoleId) {
+          return interaction.reply({
+            content: "❌ חסר muteRoleId ב־config.js.",
+            ephemeral: true
+          });
+        }
+
+        const user = interaction.options.getUser("user");
+        const reason =
+          interaction.options.getString("reason") ||
+          "לא צוינה סיבה";
+
+        const member = await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
+
+        if (!member) {
+          return interaction.reply({
+            content: "❌ המשתמש לא נמצא בשרת.",
+            ephemeral: true
+          });
+        }
+
+        const muteRole = await interaction.guild.roles
+          .fetch(config.muteRoleId)
+          .catch(() => null);
+
+        if (!muteRole) {
+          return interaction.reply({
+            content: "❌ לא מצאתי את רול ה־Chat Mute.",
+            ephemeral: true
+          });
+        }
+
+        const botMember = await interaction.guild.members
+          .fetchMe()
+          .catch(() => null);
+
+        if (
+          !botMember?.permissions.has(
+            PermissionFlagsBits.ManageRoles
+          )
+        ) {
+          return interaction.reply({
+            content: "❌ לבוט אין Manage Roles.",
+            ephemeral: true
+          });
+        }
+
+        if (
+          muteRole.position >= botMember.roles.highest.position
+        ) {
+          return interaction.reply({
+            content:
+              "❌ רול הבוט חייב להיות מעל רול ה־Chat Mute.",
+            ephemeral: true
+          });
+        }
+
+        if (interaction.commandName === "mute") {
+          if (member.roles.cache.has(muteRole.id)) {
+            return interaction.reply({
+              content: `❌ ${user} כבר ב־Chat Mute.`,
+              ephemeral: true
+            });
+          }
+
+          await member.roles.add(
+            muteRole,
+            `${reason} | by ${interaction.user.tag}`
+          );
+
+          await modLog(
+            interaction.guild,
+            new EmbedBuilder()
+              .setColor("Orange")
+              .setTitle("🔇 Chat Mute")
+              .addFields(
+                { name: "משתמש", value: `${user}` },
+                { name: "צוות", value: `${interaction.user}` },
+                { name: "סיבה", value: reason }
+              )
+              .setTimestamp()
+          );
+
+          return interaction.reply({
+            content: `✅ ${user} קיבל Chat Mute.`,
+            ephemeral: true
+          });
+        }
+
+        if (!member.roles.cache.has(muteRole.id)) {
+          return interaction.reply({
+            content: `❌ ${user} לא נמצא ב־Chat Mute.`,
+            ephemeral: true
+          });
+        }
+
+        await member.roles.remove(
+          muteRole,
+          `${reason} | by ${interaction.user.tag}`
+        );
+
+        await modLog(
+          interaction.guild,
+          new EmbedBuilder()
+            .setColor("Green")
+            .setTitle("🔊 Chat Unmute")
+            .addFields(
+              { name: "משתמש", value: `${user}` },
+              { name: "צוות", value: `${interaction.user}` },
+              { name: "סיבה", value: reason }
+            )
+            .setTimestamp()
+        );
+
+        return interaction.reply({
+          content: `✅ ה־Chat Mute הוסר מ־${user}.`,
+          ephemeral: true
+        });
+      }
+
+      if (
+        [
+          "voice-mute",
+          "voice-unmute",
+          "voice-deafen",
+          "voice-undeafen"
+        ].includes(interaction.commandName)
+      ) {
+        if (!isStaff(interaction.member)) {
+          return interaction.reply({
+            content: "❌ אין לך גישה.",
+            ephemeral: true
+          });
+        }
+
+        const user = interaction.options.getUser("user");
+        const reason =
+          interaction.options.getString("reason") ||
+          "לא צוינה סיבה";
+
+        const member = await interaction.guild.members
+          .fetch(user.id)
+          .catch(() => null);
+
+        if (!member) {
+          return interaction.reply({
+            content: "❌ המשתמש לא נמצא בשרת.",
+            ephemeral: true
+          });
+        }
+
+        if (!member.voice.channel) {
+          return interaction.reply({
+            content:
+              "❌ המשתמש לא נמצא כרגע בחדר Voice.",
+            ephemeral: true
+          });
+        }
+
+        const action = interaction.commandName;
+
+        if (action === "voice-mute") {
+          await member.voice.setMute(
+            true,
+            `${reason} | by ${interaction.user.tag}`
+          );
+
+          await modLog(
+            interaction.guild,
+            new EmbedBuilder()
+              .setColor("Orange")
+              .setTitle("🔇 Voice Mute")
+              .addFields(
+                { name: "משתמש", value: `${user}` },
+                { name: "צוות", value: `${interaction.user}` },
+                { name: "סיבה", value: reason }
+              )
+              .setTimestamp()
+          );
+
+          return interaction.reply({
+            content: `✅ ${user} קיבל Voice Mute.`,
+            ephemeral: true
+          });
+        }
+
+        if (action === "voice-unmute") {
+          await member.voice.setMute(
+            false,
+            `${reason} | by ${interaction.user.tag}`
+          );
+
+          await modLog(
+            interaction.guild,
+            new EmbedBuilder()
+              .setColor("Green")
+              .setTitle("🔊 Voice Unmute")
+              .addFields(
+                { name: "משתמש", value: `${user}` },
+                { name: "צוות", value: `${interaction.user}` },
+                { name: "סיבה", value: reason }
+              )
+              .setTimestamp()
+          );
+
+          return interaction.reply({
+            content: `✅ ה־Voice Mute הוסר מ־${user}.`,
+            ephemeral: true
+          });
+        }
+
+        if (action === "voice-deafen") {
+          await member.voice.setDeaf(
+            true,
+            `${reason} | by ${interaction.user.tag}`
+          );
+
+          await modLog(
+            interaction.guild,
+            new EmbedBuilder()
+              .setColor("DarkOrange")
+              .setTitle("🎧 Voice Deafen")
+              .addFields(
+                { name: "משתמש", value: `${user}` },
+                { name: "צוות", value: `${interaction.user}` },
+                { name: "סיבה", value: reason }
+              )
+              .setTimestamp()
+          );
+
+          return interaction.reply({
+            content: `✅ ${user} קיבל Voice Deafen.`,
+            ephemeral: true
+          });
+        }
+
+        await member.voice.setDeaf(
+          false,
+          `${reason} | by ${interaction.user.tag}`
+        );
+
+        await modLog(
+          interaction.guild,
+          new EmbedBuilder()
+            .setColor("Green")
+            .setTitle("🎧 Voice Undeafen")
+            .addFields(
+              { name: "משתמש", value: `${user}` },
+              { name: "צוות", value: `${interaction.user}` },
+              { name: "סיבה", value: reason }
+            )
+            .setTimestamp()
+        );
+
+        return interaction.reply({
+          content: `✅ ה־Voice Deafen הוסר מ־${user}.`,
+          ephemeral: true
+        });
       }
 
       if (interaction.commandName === "warn") {
