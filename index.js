@@ -2,6 +2,9 @@ console.log("🚀 Starting bot...");
 
 require("dotenv").config();
 
+const fs = require("fs");
+const path = require("path");
+
 const {
   Client,
   GatewayIntentBits,
@@ -23,6 +26,38 @@ const {
 } = require("discord.js");
 
 const config = require("./config");
+
+const DATA_DIR = path.join(__dirname, "data");
+const MOD_TIMERS_FILE = path.join(DATA_DIR, "mod-timers.json");
+
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function loadJson(filePath, fallback) {
+  if (!fs.existsSync(filePath)) return fallback;
+
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    console.error("❌ JSON load error:", error);
+    return fallback;
+  }
+}
+
+function saveJson(filePath, data) {
+  try {
+    fs.writeFileSync(
+      filePath,
+      JSON.stringify(data, null, 2)
+    );
+  } catch (error) {
+    console.error("❌ JSON save error:", error);
+  }
+}
+
+const modTimers = loadJson(MOD_TIMERS_FILE, {});
+
 
 process.on("unhandledRejection", error => {
   console.error("❌ Unhandled Rejection:", error);
@@ -90,10 +125,48 @@ function userReasonCommand(name, description) {
 }
 
 async function registerSlashCommands() {
+  function userReasonCommand(
+    name,
+    description,
+    withDuration = false
+  ) {
+    const command = new SlashCommandBuilder()
+      .setName(name)
+      .setDescription(description)
+      .addUserOption(option =>
+        option
+          .setName("user")
+          .setDescription("המשתמש")
+          .setRequired(true)
+      );
+
+    if (withDuration) {
+      command.addStringOption(option =>
+        option
+          .setName("duration")
+          .setDescription("זמן: 30s / 10m / 2h / 3d")
+          .setRequired(true)
+      );
+    }
+
+    command.addStringOption(option =>
+      option
+        .setName("reason")
+        .setDescription("סיבה")
+        .setRequired(false)
+    );
+
+    return command;
+  }
+
   const commands = [
     new SlashCommandBuilder()
       .setName("ping")
       .setDescription("בודק אם הבוט עובד"),
+
+    new SlashCommandBuilder()
+      .setName("help")
+      .setDescription("מציג את כל פקודות הבוט"),
 
     new SlashCommandBuilder()
       .setName("ticket-panel")
@@ -155,7 +228,8 @@ async function registerSlashCommands() {
 
     userReasonCommand(
       "mute",
-      "נותן Chat Mute למשתמש"
+      "נותן Chat Mute למשתמש",
+      true
     ),
 
     userReasonCommand(
@@ -165,34 +239,26 @@ async function registerSlashCommands() {
 
     userReasonCommand(
       "voice-mute",
-      "עושה Server Mute למשתמש ב־Voice"
+      "עושה Voice Mute למשתמש",
+      true
     ),
 
     userReasonCommand(
       "voice-unmute",
-      "מוריד Server Mute ממשתמש"
+      "מוריד Voice Mute ממשתמש"
     ),
 
     userReasonCommand(
       "voice-deafen",
-      "עושה Server Deafen למשתמש"
+      "עושה Voice Deafen למשתמש",
+      true
     ),
 
     userReasonCommand(
       "voice-undeafen",
-      "מוריד Server Deafen ממשתמש"
+      "מוריד Voice Deafen ממשתמש"
     )
   ].map(command => command.toJSON());
-
-  if (!process.env.TOKEN) {
-    throw new Error("TOKEN missing");
-  }
-
-  if (!config.clientId || !config.guildId) {
-    throw new Error(
-      "clientId או guildId חסרים ב־config.js"
-    );
-  }
 
   const rest = new REST({
     version: "10"
@@ -222,7 +288,6 @@ async function registerSlashCommands() {
       .join("\n")
   );
 }
-
 
 function isStaff(member) {
   return Boolean(
@@ -421,6 +486,13 @@ client.once(Events.ClientReady, async readyClient => {
 
   try {
     await registerSlashCommands();
+    await checkModTimers();
+
+    setInterval(() => {
+      checkModTimers().catch(error => {
+        console.error("❌ Timer check error:", error);
+      });
+    }, 15 * 1000);
   } catch (error) {
     console.error(
       "❌ Slash command registration failed:",
@@ -429,50 +501,61 @@ client.once(Events.ClientReady, async readyClient => {
   }
 });
 
+
+function buildHelpEmbed() {
+  return new EmbedBuilder()
+    .setColor("Blue")
+    .setTitle("📚 Help")
+    .setDescription(
+      [
+        "**בדיקת הבוט**",
+        "`/ping` — בודק אם הבוט עובד",
+        "",
+        "**טיקטים**",
+        "`/ticket-panel` — שולח פאנל טיקטים",
+        "",
+        "**מודרציה**",
+        "`/warn` — אזהרה",
+        "`/timeout` — Timeout",
+        "`/kick` — Kick",
+        "`/ban` — Ban",
+        "`/clear` — מחיקת הודעות",
+        "",
+        "**Chat Mute**",
+        "`/mute user duration reason` — Chat Mute זמני",
+        "`/unmute user reason` — מסיר Chat Mute",
+        "",
+        "**Voice**",
+        "`/voice-mute user duration reason` — Voice Mute זמני",
+        "`/voice-unmute user reason` — מסיר Voice Mute",
+        "`/voice-deafen user duration reason` — Voice Deafen זמני",
+        "`/voice-undeafen user reason` — מסיר Voice Deafen",
+        "",
+        "**זמנים נתמכים**",
+        "`30s` / `10m` / `2h` / `3d`",
+        "",
+        `גם \`${config.prefix || "!"}h\` מציג את ההודעה הזאת.`
+      ].join("\n")
+    )
+    .setTimestamp();
+}
+
 client.on(Events.MessageCreate, async message => {
   try {
     if (!message.guild) return;
     if (message.author.bot) return;
 
     const prefix = config.prefix || "!";
-    const content = String(message.content || "").trim();
+    const content = String(message.content || "")
+      .trim()
+      .toLowerCase();
 
-    if (content.toLowerCase() !== `${prefix}h`.toLowerCase()) {
+    if (content !== `${prefix}h`.toLowerCase()) {
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setColor("Blue")
-      .setTitle("📚 Help")
-      .setDescription(
-        [
-          "**בדיקת הבוט**",
-          "`/ping` — בודק אם הבוט עובד",
-          "",
-          "**טיקטים**",
-          "`/ticket-panel` — שולח פאנל טיקטים",
-          "",
-          "**מודרציה**",
-          "`/warn` — אזהרה למשתמש",
-          "`/timeout` — Timeout למשתמש",
-          "`/kick` — מעיף משתמש",
-          "`/ban` — נותן באן",
-          "`/clear` — מוחק הודעות",
-          "`/mute` — Chat Mute",
-          "`/unmute` — הסרת Chat Mute",
-          "`/voice-mute` — Server Mute ב־Voice",
-          "`/voice-unmute` — הסרת Server Mute",
-          "`/voice-deafen` — Server Deafen",
-          "`/voice-undeafen` — הסרת Server Deafen"
-        ].join("\n")
-      )
-      .setFooter({
-        text: `Prefix: ${prefix}`
-      })
-      .setTimestamp();
-
-    await message.reply({
-      embeds: [embed]
+    return message.reply({
+      embeds: [buildHelpEmbed()]
     });
   } catch (error) {
     console.error("❌ !h error:", error);
@@ -485,6 +568,13 @@ client.on(Events.InteractionCreate, async interaction => {
       if (interaction.commandName === "ping") {
         return interaction.reply({
           content: `🏓 Pong! ${client.ws.ping}ms`,
+          ephemeral: true
+        });
+      }
+
+      if (interaction.commandName === "help") {
+        return interaction.reply({
+          embeds: [buildHelpEmbed()],
           ephemeral: true
         });
       }
@@ -607,35 +697,16 @@ client.on(Events.InteractionCreate, async interaction => {
           });
         }
 
-        const botMember = await interaction.guild.members
-          .fetchMe()
-          .catch(() => null);
-
-        if (
-          !botMember?.permissions.has(
-            PermissionFlagsBits.ManageRoles
-          )
-        ) {
-          return interaction.reply({
-            content: "❌ לבוט אין Manage Roles.",
-            ephemeral: true
-          });
-        }
-
-        if (
-          muteRole.position >= botMember.roles.highest.position
-        ) {
-          return interaction.reply({
-            content:
-              "❌ רול הבוט חייב להיות מעל רול ה־Chat Mute.",
-            ephemeral: true
-          });
-        }
-
         if (interaction.commandName === "mute") {
-          if (member.roles.cache.has(muteRole.id)) {
+          const durationText =
+            interaction.options.getString("duration");
+          const duration = parseDuration(durationText);
+
+          if (!duration) {
             return interaction.reply({
-              content: `❌ ${user} כבר ב־Chat Mute.`,
+              content:
+                "❌ זמן לא תקין. השתמש ב־30s, 10m, 2h או 3d. " +
+                "המינימום 10 שניות והמקסימום 30 ימים.",
               ephemeral: true
             });
           }
@@ -645,6 +716,15 @@ client.on(Events.InteractionCreate, async interaction => {
             `${reason} | by ${interaction.user.tag}`
           );
 
+          addModTimer({
+            guildId: interaction.guild.id,
+            userId: user.id,
+            type: "chat-mute",
+            expiresAt: Date.now() + duration,
+            reason,
+            moderatorId: interaction.user.id
+          });
+
           await modLog(
             interaction.guild,
             new EmbedBuilder()
@@ -652,6 +732,7 @@ client.on(Events.InteractionCreate, async interaction => {
               .setTitle("🔇 Chat Mute")
               .addFields(
                 { name: "משתמש", value: `${user}` },
+                { name: "זמן", value: formatDuration(duration) },
                 { name: "צוות", value: `${interaction.user}` },
                 { name: "סיבה", value: reason }
               )
@@ -659,14 +740,8 @@ client.on(Events.InteractionCreate, async interaction => {
           );
 
           return interaction.reply({
-            content: `✅ ${user} קיבל Chat Mute.`,
-            ephemeral: true
-          });
-        }
-
-        if (!member.roles.cache.has(muteRole.id)) {
-          return interaction.reply({
-            content: `❌ ${user} לא נמצא ב־Chat Mute.`,
+            content:
+              `✅ ${user} קיבל Chat Mute ל־**${formatDuration(duration)}**.`,
             ephemeral: true
           });
         }
@@ -674,6 +749,12 @@ client.on(Events.InteractionCreate, async interaction => {
         await member.roles.remove(
           muteRole,
           `${reason} | by ${interaction.user.tag}`
+        );
+
+        removeModTimer(
+          interaction.guild.id,
+          user.id,
+          "chat-mute"
         );
 
         await modLog(
@@ -728,27 +809,88 @@ client.on(Events.InteractionCreate, async interaction => {
 
         if (!member.voice.channel) {
           return interaction.reply({
-            content:
-              "❌ המשתמש לא נמצא כרגע בחדר Voice.",
+            content: "❌ המשתמש לא נמצא כרגע ב־Voice.",
             ephemeral: true
           });
         }
 
         const action = interaction.commandName;
 
-        if (action === "voice-mute") {
-          await member.voice.setMute(
+        if (
+          action === "voice-mute" ||
+          action === "voice-deafen"
+        ) {
+          const durationText =
+            interaction.options.getString("duration");
+          const duration = parseDuration(durationText);
+
+          if (!duration) {
+            return interaction.reply({
+              content:
+                "❌ זמן לא תקין. השתמש ב־30s, 10m, 2h או 3d. " +
+                "המינימום 10 שניות והמקסימום 30 ימים.",
+              ephemeral: true
+            });
+          }
+
+          if (action === "voice-mute") {
+            await member.voice.setMute(
+              true,
+              `${reason} | by ${interaction.user.tag}`
+            );
+
+            addModTimer({
+              guildId: interaction.guild.id,
+              userId: user.id,
+              type: "voice-mute",
+              expiresAt: Date.now() + duration,
+              reason,
+              moderatorId: interaction.user.id
+            });
+
+            await modLog(
+              interaction.guild,
+              new EmbedBuilder()
+                .setColor("Orange")
+                .setTitle("🔇 Voice Mute")
+                .addFields(
+                  { name: "משתמש", value: `${user}` },
+                  { name: "זמן", value: formatDuration(duration) },
+                  { name: "צוות", value: `${interaction.user}` },
+                  { name: "סיבה", value: reason }
+                )
+                .setTimestamp()
+            );
+
+            return interaction.reply({
+              content:
+                `✅ ${user} קיבל Voice Mute ל־**${formatDuration(duration)}**.`,
+              ephemeral: true
+            });
+          }
+
+          await member.voice.setDeaf(
             true,
             `${reason} | by ${interaction.user.tag}`
           );
 
+          addModTimer({
+            guildId: interaction.guild.id,
+            userId: user.id,
+            type: "voice-deafen",
+            expiresAt: Date.now() + duration,
+            reason,
+            moderatorId: interaction.user.id
+          });
+
           await modLog(
             interaction.guild,
             new EmbedBuilder()
-              .setColor("Orange")
-              .setTitle("🔇 Voice Mute")
+              .setColor("DarkOrange")
+              .setTitle("🎧 Voice Deafen")
               .addFields(
                 { name: "משתמש", value: `${user}` },
+                { name: "זמן", value: formatDuration(duration) },
                 { name: "צוות", value: `${interaction.user}` },
                 { name: "סיבה", value: reason }
               )
@@ -756,7 +898,8 @@ client.on(Events.InteractionCreate, async interaction => {
           );
 
           return interaction.reply({
-            content: `✅ ${user} קיבל Voice Mute.`,
+            content:
+              `✅ ${user} קיבל Voice Deafen ל־**${formatDuration(duration)}**.`,
             ephemeral: true
           });
         }
@@ -767,46 +910,14 @@ client.on(Events.InteractionCreate, async interaction => {
             `${reason} | by ${interaction.user.tag}`
           );
 
-          await modLog(
-            interaction.guild,
-            new EmbedBuilder()
-              .setColor("Green")
-              .setTitle("🔊 Voice Unmute")
-              .addFields(
-                { name: "משתמש", value: `${user}` },
-                { name: "צוות", value: `${interaction.user}` },
-                { name: "סיבה", value: reason }
-              )
-              .setTimestamp()
+          removeModTimer(
+            interaction.guild.id,
+            user.id,
+            "voice-mute"
           );
 
           return interaction.reply({
             content: `✅ ה־Voice Mute הוסר מ־${user}.`,
-            ephemeral: true
-          });
-        }
-
-        if (action === "voice-deafen") {
-          await member.voice.setDeaf(
-            true,
-            `${reason} | by ${interaction.user.tag}`
-          );
-
-          await modLog(
-            interaction.guild,
-            new EmbedBuilder()
-              .setColor("DarkOrange")
-              .setTitle("🎧 Voice Deafen")
-              .addFields(
-                { name: "משתמש", value: `${user}` },
-                { name: "צוות", value: `${interaction.user}` },
-                { name: "סיבה", value: reason }
-              )
-              .setTimestamp()
-          );
-
-          return interaction.reply({
-            content: `✅ ${user} קיבל Voice Deafen.`,
             ephemeral: true
           });
         }
@@ -816,17 +927,10 @@ client.on(Events.InteractionCreate, async interaction => {
           `${reason} | by ${interaction.user.tag}`
         );
 
-        await modLog(
-          interaction.guild,
-          new EmbedBuilder()
-            .setColor("Green")
-            .setTitle("🎧 Voice Undeafen")
-            .addFields(
-              { name: "משתמש", value: `${user}` },
-              { name: "צוות", value: `${interaction.user}` },
-              { name: "סיבה", value: reason }
-            )
-            .setTimestamp()
+        removeModTimer(
+          interaction.guild.id,
+          user.id,
+          "voice-deafen"
         );
 
         return interaction.reply({
